@@ -1,0 +1,37 @@
+node_modules/
+.next/
+dist/
+out/
+*.log
+data/
+tmp/
+
+# ── Environment files (contain secrets) ──────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+
+# ── Foundry build/deploy artifacts ───────────────────────
+contracts/out/
+contracts/cache/
+contracts/lib/
+contracts/broadcast/
+
+# ── Generated test reports (contain wallet addresses, tx hashes, tokens) ──
+backend/test/*-report.json
+backend/test/*-report-*.json
+
+# ── Credential files ─────────────────────────────────────
+*.key
+*.pem
+apikey.txt
+backend/apikey.txt
+
+# ── OS / IDE ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
