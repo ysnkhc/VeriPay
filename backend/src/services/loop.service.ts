@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { ethers } from "ethers";
 import { ActionType } from "../types/session";
 import { Agent, AgentMode } from "../types/agent";
 import { getAgentById } from "./agent.service";
@@ -11,6 +12,7 @@ import {
   markActionFailed,
   markActionTimeout,
   computeActionHash,
+  claimNextActionIndex,
 } from "./session.service";
 import {
   createSessionOnchain,
@@ -25,6 +27,17 @@ import {
   settleActionOnchain as settleAction,
   mintTestUSDC,
   fundCustomerETH,
+  addPendingAction,
+  getPendingCount,
+  triggerBatchSettlement,
+  shouldTriggerBatch,
+  awaitPendingBatches,
+  getBatchResults,
+  getActionRoot,
+  getActionRootMeta,
+  getProofRoot,
+  PendingAction,
+  BatchResult,
 } from "./settlement.service";
 import { invokeProvider } from "./provider-invoke.service";
 
@@ -297,17 +310,23 @@ export interface AgentActionResult {
   output: string;
   recordTxHash: string;
   settleTxHash: string;
+  settlementStatus: "PENDING" | "SETTLED" | "FAILED";
   executionStatus: "success" | "failed" | "timeout";
   executionMs?: number;
   retryCount?: number;
   errorMessage?: string;
+  batchInfo?: {
+    pendingCount: number;
+    batchTriggered: boolean;
+  };
 }
 
 /**
  * Execute a single action in agent mode:
- * 1. Call provider endpoint (real HTTP) or generate mock output (seed agents)
- * 2. On success: record action onchain + settle (pays provider)
- * 3. On failure/timeout: record action as failed, NO settlement
+ * 1. Claim action index (atomic — safe under concurrency)
+ * 2. Call provider endpoint (real HTTP) or generate mock output
+ * 3. On success: queue for background batch settlement (DOES NOT BLOCK)
+ * 4. On failure/timeout: record as failed, NO settlement
  */
 export async function runAgentAction(
   sessionId: string,
@@ -326,7 +345,9 @@ export async function runAgentAction(
   if (!agent) throw new Error("Provider agent not found");
 
   const price = getActionPrice(agent.id, actionType);
-  const index = session.totalActions;
+
+  // Atomically claim index BEFORE any await (concurrency-safe)
+  const index = claimNextActionIndex(sessionId);
 
   // 1. Get output — real endpoint or mock
   let output: string;
@@ -336,7 +357,6 @@ export async function runAgentAction(
   let errorMessage: string | undefined;
 
   if (agent.source === "registered" && !agent.endpoint.startsWith("mock://")) {
-    // Real provider invocation — handles retries and timeouts internally
     const response = await invokeProvider(agent.endpoint, {
       sessionId,
       actionType,
@@ -352,10 +372,9 @@ export async function runAgentAction(
     if (response.status === "error") {
       executionStatus = response.errorMessage?.includes("timeout") ? "timeout" : "failed";
       errorMessage = response.errorMessage;
-      output = ""; // no output on failure
+      output = "";
     }
   } else {
-    // Fallback to mock for seed agents
     const mock = generateMockOutput(agent.mode, actionType, index);
     input = mock.input;
     output = mock.output;
@@ -366,18 +385,13 @@ export async function runAgentAction(
   // 2. Record locally
   addAction(sessionId, actionType, 1, price, input, output || "", hash);
 
-  // 3. Handle based on execution result
+  // 3. Handle failure
   if (executionStatus !== "success") {
-    // Failed/timeout → record but do NOT settle (no payment on failure)
     if (executionStatus === "timeout") {
       markActionTimeout(sessionId, index, errorMessage || "Provider timeout");
     } else {
       markActionFailed(sessionId, index, errorMessage || "Provider execution failed");
     }
-
-    console.warn(
-      `[agent-loop] Action ${index} FAILED in session ${sessionId}: ${errorMessage}`
-    );
 
     return {
       index,
@@ -387,6 +401,7 @@ export async function runAgentAction(
       output: "",
       recordTxHash: "",
       settleTxHash: "",
+      settlementStatus: "FAILED" as const,
       executionStatus,
       executionMs,
       retryCount,
@@ -394,19 +409,31 @@ export async function runAgentAction(
     };
   }
 
-  // 4. Success — record onchain using operator (settlement intermediary)
-  const { actionIndex, txHash: recordTx } = await recordActionOnchain(
-    session.onchainId!,
+  // 4. Success — queue for batch settlement (INSTANT — no blocking)
+  const inputHashBytes = ethers.keccak256(ethers.toUtf8Bytes(input || ""));
+  const outputHashBytes = ethers.keccak256(ethers.toUtf8Bytes(output || ""));
+
+  const pendingAction: PendingAction = {
+    actionIndex: index,
     actionType,
-    1,
-    hash
-  );
+    units: 1,
+    amount: price,
+    actionHash: hash,
+    provider: agent.walletAddress,
+    customer: session.consumerAddress,
+    sessionId: session.onchainId!,
+    timestamp: Date.now(),
+    inputHash: inputHashBytes,
+    outputHash: outputHashBytes,
+  };
 
-  // 5. Settle onchain (operator settles — pays provider from deposited funds)
-  const settleTx = await settleActionOnchain(session.onchainId!, actionIndex);
+  const pendingCount = addPendingAction(session.onchainId!, pendingAction);
+  const batchTriggered = shouldTriggerBatch(session.onchainId!);
 
-  // 6. Mark settled locally
-  markActionSettled(sessionId, index, settleTx);
+  if (batchTriggered) {
+    // Fire-and-forget — settles in background, does NOT block this response
+    triggerBatchSettlement(session.onchainId!, sessionId);
+  }
 
   return {
     index,
@@ -414,11 +441,16 @@ export async function runAgentAction(
     price,
     input,
     output,
-    recordTxHash: recordTx,
-    settleTxHash: settleTx,
-    executionStatus: "success",
+    recordTxHash: "",
+    settleTxHash: "",
+    settlementStatus: "PENDING" as const,
+    executionStatus: "success" as const,
     executionMs,
     retryCount,
+    batchInfo: {
+      pendingCount,
+      batchTriggered,
+    },
   };
 }
 
@@ -428,17 +460,39 @@ export async function runAgentAction(
 export async function finalizeAgentSession(
   sessionId: string,
   customerPrivateKey: string
-): Promise<void> {
+): Promise<{ batches: BatchResult[]; proofRoot: string; rootMeta: { firstActionIndex: number; lastActionIndex: number; actionCount: number; totalAmount: number } }> {
   const session = getSession(sessionId);
   if (!session) throw new Error("Session not found");
   if (session.mode !== "agent") throw new Error("Not an agent-mode session");
   if (!session.onchainId) throw new Error("Session has no onchain ID");
 
+  const proofRoot = getActionRoot(session.onchainId);
+  const rootMeta = getActionRootMeta(session.onchainId);
+
+  // Await ALL inflight batches + flush remaining pending actions
+  // This is where the SINGLE settleOffchain tx happens
+  await awaitPendingBatches(session.onchainId);
+
+  // Mark settled actions from completed batches
+  const batches = getBatchResults(session.onchainId);
+  let settledCount = 0;
+  for (const batch of batches) {
+    if (batch.status === "CONFIRMED" || batch.status === "PENDING_CONFIRMATION") {
+      for (let j = 0; j < batch.actionCount; j++) {
+        markActionSettled(sessionId, settledCount + j, batch.settleTxHash);
+      }
+      settledCount += batch.actionCount;
+    }
+  }
+
   await finalizeSessionOnchain(session.onchainId);
   updateSession(sessionId, { status: "completed", finalizedAt: Date.now() });
 
+  const totalSettleTxs = batches.length;
   console.log(
-    `[agent-loop] Session ${sessionId} finalized — ${session.settledActions} settled, ${session.failedActions || 0} failed`
+    `[agent-loop] Session ${sessionId} finalized — ${session.totalActions} actions → ${totalSettleTxs} settle tx(s) | actionRoot: ${proofRoot.slice(0, 18)}…`
   );
+
+  return { batches, proofRoot, rootMeta };
 }
 

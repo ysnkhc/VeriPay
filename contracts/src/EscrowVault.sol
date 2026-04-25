@@ -44,6 +44,12 @@ contract NanoSettlement is ReentrancyGuard {
         address indexed consumer,
         uint256 amount
     );
+    event OffchainBatchSettled(
+        uint256 indexed sessionId,
+        uint256 actionCount,
+        uint256 totalAmount,
+        bytes32 proofRoot
+    );
 
     // ── Modifiers ───────────────────────────────────────────────────────
     modifier onlyOwner() {
@@ -120,6 +126,34 @@ contract NanoSettlement is ReentrancyGuard {
 
         // Single transfer for the batch
         usdc.safeTransfer(s.provider, totalCost);
+    }
+
+    /// @notice Settle offchain-metered actions in a single tx.
+    ///         No per-action recording required. Hash-chain proof ensures integrity.
+    /// @param sessionId  The session to settle for
+    /// @param actionCount Number of offchain actions in this batch
+    /// @param totalAmount Total USDC to transfer to provider
+    /// @param proofRoot   Incremental hash-chain root proving action integrity
+    function settleOffchain(
+        uint256 sessionId,
+        uint256 actionCount,
+        uint256 totalAmount,
+        bytes32 proofRoot
+    ) external nonReentrant onlyOwner {
+        Types.Session memory s = meter.getSession(sessionId);
+        require(s.provider != address(0), "Invalid session");
+
+        SessionDeposit storage dep = deposits[sessionId];
+        uint256 remaining = dep.deposited - dep.spent;
+        require(remaining >= totalAmount, "Insufficient deposit");
+
+        dep.spent += totalAmount;
+        dep.settledUpTo += actionCount;
+
+        // Single USDC transfer to provider
+        usdc.safeTransfer(s.provider, totalAmount);
+
+        emit OffchainBatchSettled(sessionId, actionCount, totalAmount, proofRoot);
     }
 
     function withdrawUnused(uint256 sessionId) external nonReentrant {

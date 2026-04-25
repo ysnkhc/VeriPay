@@ -163,6 +163,19 @@ export function markActionTimeout(
   return action;
 }
 
+// ── Atomic index claim (concurrency-safe) ────────────────────────────────
+
+/**
+ * Atomically claim the next action index for a session.
+ * MUST be called synchronously (before any await) to prevent
+ * concurrent requests from claiming the same index.
+ */
+export function claimNextActionIndex(sessionId: string): number {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error("Session not found");
+  return session.totalActions++;
+}
+
 // ── Budget check ────────────────────────────────────────────────────────
 
 export function getRemainingBudget(sessionId: string): number {

@@ -1,0 +1,12 @@
+{
+  "name": "veripay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VeriPay — Arc Testnet nanopayment dApp with agent-to-agent payment loop",
+  "scripts": {
+    "backend": "cd backend && npm run dev",
+    "agent:provider": "cd agents/provider-agent && npm start",
+    "agent:customer:test": "cd agents/customer-agent && node runner.js --test",
+    "agent:customer:demo": "cd agents/customer-agent && node runner.js --demo"
+  }
+}

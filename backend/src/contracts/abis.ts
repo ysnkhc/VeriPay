@@ -18,12 +18,14 @@ export const NanoSettlementABI = [
   "function depositSession(uint256 sessionId, uint256 amount) external",
   "function settleAction(uint256 sessionId, uint256 actionIndex) external",
   "function settleBatch(uint256 sessionId, uint256 count) external",
+  "function settleOffchain(uint256 sessionId, uint256 actionCount, uint256 totalAmount, bytes32 proofRoot) external",
   "function withdrawUnused(uint256 sessionId) external",
   "function getDeposit(uint256 sessionId) view returns (uint256 deposited, uint256 spent, uint256 remaining)",
   "function getTotalPaid(uint256 sessionId) view returns (uint256)",
   "function getSettledActionCount(uint256 sessionId) view returns (uint256)",
   "event SessionFunded(uint256 indexed sessionId, address indexed consumer, uint256 amount)",
   "event ActionSettled(uint256 indexed sessionId, uint256 indexed actionIndex, address indexed provider, uint256 amount, uint256 totalPaidSoFar)",
+  "event OffchainBatchSettled(uint256 indexed sessionId, uint256 actionCount, uint256 totalAmount, bytes32 proofRoot)",
   "event UnusedWithdrawn(uint256 indexed sessionId, address indexed consumer, uint256 amount)",
 ] as const;
 

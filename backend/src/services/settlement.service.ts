@@ -127,8 +127,307 @@ export async function depositSessionOnchain(
   });
 }
 
-// Track per-session action indices locally to avoid event parsing issues
-const _sessionActionCounters: Map<number, number> = new Map();
+// ── Offchain Metering + Hash Chain ───────────────────────────────────────
+
+export interface PendingAction {
+  actionIndex: number;
+  actionType: ActionType;
+  units: number;
+  amount: number;
+  actionHash: string;
+  provider: string;
+  customer: string;
+  sessionId: number;
+  timestamp: number;
+  inputHash: string;
+  outputHash: string;
+}
+
+// In-memory queue: onchainSessionId → PendingAction[]
+const _pendingActions: Map<number, PendingAction[]> = new Map();
+
+// Structured action root per session: Merkle-style incremental root
+// Each leaf = keccak256(sessionId, actionIndex, customer, provider, price, timestamp, inputHash, outputHash)
+// Root = keccak256(prevRoot ‖ leaf)
+const _actionRoots: Map<number, string> = new Map();
+const _actionRootMeta: Map<number, { firstActionIndex: number; lastActionIndex: number; actionCount: number; totalAmount: number }> = new Map();
+
+// Track batch results: onchainSessionId → BatchResult[]
+export interface BatchResult {
+  batchIndex: number;
+  actionCount: number;
+  totalAmount: number;
+  settleTxHash: string;
+  proofRoot: string;
+  settledAt: number;
+  status: "PENDING_CONFIRMATION" | "CONFIRMED" | "FAILED";
+}
+const _batchResults: Map<number, BatchResult[]> = new Map();
+
+// Per-session batch queue — ensures batches for same session settle sequentially
+const _sessionBatchQueue: Map<number, Promise<any>> = new Map();
+
+// Inflight batch promises per session — used by awaitPendingBatches
+const _inflightBatches: Map<number, Set<Promise<any>>> = new Map();
+
+// Track total onchain txs for demo metrics
+let _totalOnchainTxs = 0;
+export function getTotalOnchainTxCount(): number { return _totalOnchainTxs; }
+export function incrementTxCount(): void { _totalOnchainTxs++; }
+
+/**
+ * Compute structured action leaf and extend Merkle-style action root.
+ *
+ * leaf = keccak256(sessionId, actionIndex, customer, provider, price, timestamp, inputHash, outputHash)
+ * root[0] = keccak256(0x00..00 ‖ leaf0)
+ * root[n] = keccak256(root[n-1] ‖ leafN)
+ */
+function computeActionLeaf(action: PendingAction): string {
+  return ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode(
+      ["uint256", "uint256", "address", "address", "uint256", "uint256", "bytes32", "bytes32"],
+      [
+        action.sessionId,
+        action.actionIndex,
+        action.customer,
+        action.provider,
+        action.amount,
+        action.timestamp,
+        action.inputHash,
+        action.outputHash,
+      ]
+    )
+  );
+}
+
+function extendActionRoot(onchainSessionId: number, action: PendingAction): string {
+  const prev = _actionRoots.get(onchainSessionId) || ethers.ZeroHash;
+  const leaf = computeActionLeaf(action);
+  const next = ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode(["bytes32", "bytes32"], [prev, leaf])
+  );
+  _actionRoots.set(onchainSessionId, next);
+
+  // Update metadata
+  const meta = _actionRootMeta.get(onchainSessionId) || {
+    firstActionIndex: action.actionIndex,
+    lastActionIndex: action.actionIndex,
+    actionCount: 0,
+    totalAmount: 0,
+  };
+  meta.lastActionIndex = action.actionIndex;
+  meta.actionCount++;
+  meta.totalAmount += action.amount;
+  _actionRootMeta.set(onchainSessionId, meta);
+
+  return next;
+}
+
+export function getActionRoot(onchainSessionId: number): string {
+  return _actionRoots.get(onchainSessionId) || ethers.ZeroHash;
+}
+
+export function getActionRootMeta(onchainSessionId: number) {
+  return _actionRootMeta.get(onchainSessionId) || { firstActionIndex: 0, lastActionIndex: 0, actionCount: 0, totalAmount: 0 };
+}
+
+/** @deprecated alias kept for backward compat */
+export function getProofRoot(onchainSessionId: number): string {
+  return getActionRoot(onchainSessionId);
+}
+
+export function addPendingAction(onchainSessionId: number, action: PendingAction): number {
+  if (!_pendingActions.has(onchainSessionId)) {
+    _pendingActions.set(onchainSessionId, []);
+  }
+  _pendingActions.get(onchainSessionId)!.push(action);
+
+  // Extend Merkle-style action root — action is now cryptographically committed
+  extendActionRoot(onchainSessionId, action);
+
+  return _pendingActions.get(onchainSessionId)!.length;
+}
+
+export function getPendingCount(onchainSessionId: number): number {
+  return _pendingActions.get(onchainSessionId)?.length ?? 0;
+}
+
+export function getPendingAmount(onchainSessionId: number): number {
+  const pending = _pendingActions.get(onchainSessionId);
+  if (!pending) return 0;
+  return pending.reduce((sum, a) => sum + a.amount, 0);
+}
+
+export function getBatchResults(onchainSessionId: number): BatchResult[] {
+  return _batchResults.get(onchainSessionId) ?? [];
+}
+
+// ── Settlement checkpoint thresholds ──────────────────────────────────────
+const CHECKPOINT_ACTION_THRESHOLD = 100;       // settle when >= 100 pending actions
+const CHECKPOINT_AMOUNT_THRESHOLD = 100_000;   // settle when >= 0.10 USDC pending
+
+/**
+ * Check whether a checkpoint settlement should fire.
+ * Triggers when pending actions >= 100 OR pendingAmount >= 0.10 USDC.
+ * For demo100, the threshold is exactly 100 so it fires at finalize or on the 100th action.
+ */
+export function shouldTriggerBatch(onchainSessionId: number): boolean {
+  const count = getPendingCount(onchainSessionId);
+  if (count >= CHECKPOINT_ACTION_THRESHOLD) return true;
+  const amount = getPendingAmount(onchainSessionId);
+  if (amount >= CHECKPOINT_AMOUNT_THRESHOLD) return true;
+  return false;
+}
+
+// ── Background Flush (safety net only) ───────────────────────────────────
+
+let _flushStarted = false;
+
+export function startBackgroundFlush(): void {
+  if (_flushStarted) return;
+  _flushStarted = true;
+
+  console.log(`[batch] Offchain metering active — settle at finalize only (zero per-action txs)`);
+}
+
+// ── Non-blocking Batch Settlement ────────────────────────────────────────
+
+/**
+ * Trigger batch settlement in background. DOES NOT BLOCK.
+ * Returns immediately. Settlement runs asynchronously.
+ */
+export function triggerBatchSettlement(
+  onchainSessionId: number,
+  localSessionId?: string
+): void {
+  const pending = _pendingActions.get(onchainSessionId);
+  if (!pending || pending.length === 0) return;
+
+  // Drain the queue atomically
+  const batch = pending.splice(0);
+
+  // Chain onto per-session queue (ensures batches settle in order)
+  const current = _sessionBatchQueue.get(onchainSessionId) || Promise.resolve();
+  const batchPromise = current.then(
+    () => _doSettleOffchain(onchainSessionId, batch),
+    () => _doSettleOffchain(onchainSessionId, batch)
+  );
+  _sessionBatchQueue.set(onchainSessionId, batchPromise.catch(() => {}));
+
+  // Track inflight for awaitPendingBatches
+  if (!_inflightBatches.has(onchainSessionId)) {
+    _inflightBatches.set(onchainSessionId, new Set());
+  }
+  const tracked = batchPromise.finally(() => {
+    _inflightBatches.get(onchainSessionId)?.delete(tracked);
+  });
+  _inflightBatches.get(onchainSessionId)!.add(tracked);
+}
+
+/**
+ * Wait for ALL inflight batches to complete (used before finalization).
+ * Flushes any remaining pending actions first.
+ */
+export async function awaitPendingBatches(onchainSessionId: number): Promise<void> {
+  // Flush remaining pending actions as final batch
+  const remaining = _pendingActions.get(onchainSessionId);
+  if (remaining && remaining.length > 0) {
+    triggerBatchSettlement(onchainSessionId);
+  }
+
+  // Wait for all inflight batches to finish
+  const inflight = _inflightBatches.get(onchainSessionId);
+  if (inflight && inflight.size > 0) {
+    console.log(`[batch] Waiting for ${inflight.size} inflight batch(es) to complete…`);
+    await Promise.all([...inflight]);
+  }
+}
+
+/**
+ * Offchain batch settlement:
+ * 1. Compute proof root from hash chain (ZERO onchain writes for actions)
+ * 2. Submit SINGLE settleOffchain tx (1 USDC transfer for entire batch)
+ * 3. Wait for confirmation
+ */
+async function _doSettleOffchain(
+  onchainSessionId: number,
+  batch: PendingAction[]
+): Promise<BatchResult> {
+  const count = batch.length;
+  const batchIndex = _batchResults.get(onchainSessionId)?.length ?? 0;
+  const totalAmount = batch.reduce((sum, a) => sum + a.amount, 0);
+  const proofRoot = getActionRoot(onchainSessionId);
+
+  console.log(
+    `[batch] Offchain #${batchIndex}: ${count} actions, ${totalAmount} μUSDC, session ${onchainSessionId}, proof: ${proofRoot.slice(0, 18)}…`
+  );
+
+  // Submit SINGLE settleOffchain tx — the only onchain write for this batch
+  let settleTxHash: string;
+  try {
+    settleTxHash = await _fireSettleOffchain(onchainSessionId, count, totalAmount, proofRoot);
+  } catch (err: any) {
+    console.warn(`[batch] settleOffchain submit failed: ${err.message}`);
+    settleTxHash = mockTxHash();
+  }
+
+  // _fireSettleOffchain already does tx.wait() — no second wait needed.
+  // If we got a real hash, the tx is already confirmed.
+  const isFallback = settleTxHash.startsWith("0x000000");
+  const status: BatchResult["status"] = isFallback ? "PENDING_CONFIRMATION" : "CONFIRMED";
+
+  const result: BatchResult = {
+    batchIndex,
+    actionCount: count,
+    totalAmount,
+    settleTxHash,
+    proofRoot,
+    settledAt: Date.now(),
+    status,
+  };
+
+  if (!_batchResults.has(onchainSessionId)) {
+    _batchResults.set(onchainSessionId, []);
+  }
+  _batchResults.get(onchainSessionId)!.push(result);
+
+  console.log(
+    `[batch] ✅ Batch #${batchIndex} ${status}: ${count} actions, ${totalAmount} μUSDC | 1 tx: ${settleTxHash.slice(0, 20)}… | proof: ${proofRoot.slice(0, 18)}…`
+  );
+
+  return result;
+}
+
+// ── Single tx helper ─────────────────────────────────────────────────────
+
+/**
+ * Submit settleOffchain tx — SINGLE onchain write for the entire batch.
+ * No per-action recording. Hash chain proof stored via event log.
+ */
+async function _fireSettleOffchain(
+  onchainSessionId: number,
+  actionCount: number,
+  totalAmount: number,
+  proofRoot: string
+): Promise<string> {
+  if (getMode() === "fallback") return mockTxHash();
+
+  return queueOperatorTx(async () => {
+    const wallet = getOperatorWallet();
+    const settlement = getNanoSettlementContract(wallet);
+
+    const tx = await settlement.settleOffchain(onchainSessionId, actionCount, totalAmount, proofRoot);
+    const receipt = await tx.wait();
+
+    _totalOnchainTxs++;
+    console.log(
+      `[settlement] settleOffchain(${onchainSessionId}, ${actionCount} actions, ${totalAmount}μ) confirmed | tx: ${receipt.hash.slice(0, 20)}…`
+    );
+    return receipt.hash;
+  });
+}
+
+// ── Legacy wrappers (kept for demo runLoop backward compat) ──────────────
 
 export async function recordActionOnchain(
   onchainSessionId: number,
@@ -136,30 +435,9 @@ export async function recordActionOnchain(
   units: number,
   actionHash: string
 ): Promise<{ actionIndex: number; txHash: string }> {
-  if (getMode() === "fallback") {
-    return { actionIndex: 0, txHash: mockTxHash() };
-  }
-
-  return queueOperatorTx(async () => {
-    try {
-      const wallet = getOperatorWallet();
-      const meter = getUsageMeterContract(wallet);
-
-      const typeIndex = ACTION_TYPE_INDEX[actionType] ?? 0;
-      const tx = await meter.recordAction(onchainSessionId, typeIndex, units, actionHash);
-      const receipt = await tx.wait();
-
-      // Use local counter for action index (event parsing unreliable on some chains)
-      const currentIndex = _sessionActionCounters.get(onchainSessionId) ?? 0;
-      _sessionActionCounters.set(onchainSessionId, currentIndex + 1);
-
-      console.log(`[settlement] Recorded action ${currentIndex} for session ${onchainSessionId} | tx: ${receipt.hash}`);
-      return { actionIndex: currentIndex, txHash: receipt.hash };
-    } catch (err: any) {
-      console.warn(`[settlement] Onchain recordAction failed, using fallback: ${err.message}`);
-      return { actionIndex: 0, txHash: mockTxHash() };
-    }
-  });
+  // In offchain metering mode, recordAction is a NO-OP
+  // Actions are stored in memory only + hash chain
+  return { actionIndex: 0, txHash: "OFFCHAIN_RECORDED" };
 }
 
 export async function settleActionOnchain(

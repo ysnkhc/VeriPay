@@ -14,7 +14,8 @@ export function getProvider(): ethers.JsonRpcProvider {
 
 export function getOperatorWallet(): ethers.Signer {
   if (!operatorSigner) {
-    // Plain wallet — nonce safety guaranteed by queueOperatorTx serialization
+    // Plain wallet — queueOperatorTx serializes all txs, so NonceManager is not needed.
+    // NonceManager caused nonce desync after failed txs on Arc testnet.
     operatorSigner = new ethers.Wallet(config.operatorPrivateKey, getProvider());
   }
   return operatorSigner;

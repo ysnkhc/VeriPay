@@ -334,7 +334,7 @@ router.post("/sessions/:id/finalize", async (req, res) => {
       return res.status(400).json({ error: "Customer has no wallet key" });
     }
 
-    await finalizeAgentSession(session.id, customer.privateKey);
+    const { batches, proofRoot, rootMeta } = await finalizeAgentSession(session.id, customer.privateKey);
 
     const finalSession = getSession(session.id);
     res.json({
@@ -345,6 +345,19 @@ router.post("/sessions/:id/finalize", async (req, res) => {
         failedActions: finalSession?.failedActions || 0,
         totalPaid: finalSession?.totalPaid || 0,
         budgetReturned: (finalSession?.budget || 0) - (finalSession?.totalPaid || 0),
+        batchCount: batches.length,
+        actionRoot: proofRoot,
+        proofRoot,
+        metering: "offchain",
+        rootMeta,
+        batches: batches.map(b => ({
+          batchIndex: b.batchIndex,
+          actionCount: b.actionCount,
+          totalAmount: b.totalAmount,
+          settleTxHash: b.settleTxHash,
+          proofRoot: b.proofRoot,
+          status: b.status,
+        })),
       },
     });
   } catch (err: any) {

@@ -1,0 +1,15 @@
+{
+  "name": "veripay-customer-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VeriPay customer agent — automated buyer for Arc Testnet agent-to-agent payment loop",
+  "scripts": {
+    "test": "node runner.js --test",
+    "demo": "node runner.js --demo",
+    "start": "node runner.js --test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.1",
+    "ethers": "^6.11.0"
+  }
+}

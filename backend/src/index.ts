@@ -9,7 +9,7 @@ import protocolRouter from "./routes/protocol.routes";
 import operatorRouter from "./routes/operator.routes";
 import { getAllAgents } from "./services/agent.service";
 import { getTxFeed } from "./services/session.service";
-import { checkRpcConnection, isRpcConnected, getMode } from "./services/settlement.service";
+import { checkRpcConnection, isRpcConnected, getMode, startBackgroundFlush } from "./services/settlement.service";
 import { startRegistrySync } from "./services/registry.service";
 
 const app = express();
@@ -92,6 +92,7 @@ if (process.env.VERCEL !== "1") {
       if (rpcOk) {
         console.log("  ✅ ONCHAIN MODE — real settlements via Anvil");
         startRegistrySync();
+        startBackgroundFlush();
       } else {
         console.log("  ⚠️  FALLBACK MODE — RPC unreachable, using offchain mock");
         console.log("     Start Anvil and restart to enable onchain mode.");
