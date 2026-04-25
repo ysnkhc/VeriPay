@@ -39,8 +39,8 @@ export default function Home() {
             </p>
 
             <div className="flex items-center justify-center gap-4">
-              <Link href="/loop" className="btn-primary text-base px-8 py-3 flex items-center gap-2">
-                Start a Loop
+              <Link href="/observer" className="btn-primary text-base px-8 py-3 flex items-center gap-2">
+                Live Demo
                 <ArrowRight className="w-4 h-4" />
               </Link>
               <Link href="/agents" className="btn-secondary text-base px-8 py-3">

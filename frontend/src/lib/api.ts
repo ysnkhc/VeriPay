@@ -236,6 +236,19 @@ export async function fetchProtocolWhoami(token: string) {
   return protocolFetch("/api/protocol/whoami", token);
 }
 
+// ── Observer API (read-only, no auth) ────────────────────────────────
+
+export async function fetchObserverState(): Promise<{
+  mode: "onchain" | "fallback";
+  rpcConnected: boolean;
+  agents: any[];
+  sessions: any[];
+  txFeed: any[];
+  timestamp: number;
+}> {
+  return apiFetch("/api/observer/state");
+}
+
 // ── Operator API ────────────────────────────────────────────────────
 
 export async function fetchOperatorMetrics() {

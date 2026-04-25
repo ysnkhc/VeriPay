@@ -8,7 +8,7 @@ import dashboardRouter from "./routes/dashboard.routes";
 import protocolRouter from "./routes/protocol.routes";
 import operatorRouter from "./routes/operator.routes";
 import { getAllAgents } from "./services/agent.service";
-import { getTxFeed } from "./services/session.service";
+import { getTxFeed, getAllSessions } from "./services/session.service";
 import { checkRpcConnection, isRpcConnected, getMode, startBackgroundFlush } from "./services/settlement.service";
 import { startRegistrySync } from "./services/registry.service";
 
@@ -62,6 +62,38 @@ app.use("/api/dashboard", dashboardRouter); // UI layer
 app.get("/api/tx-feed", (req, res) => {
   const limit = parseInt(req.query.limit as string) || 50;
   res.json(getTxFeed(limit));
+});
+
+// ── Observer: combined read-only state for Live Demo Observer UI ──────
+app.get("/api/observer/state", async (_req, res) => {
+  const agents = getAllAgents().map((a) => ({
+    id: a.id,
+    name: a.name,
+    role: a.role,
+    walletAddress: a.walletAddress,
+    endpoint: a.endpoint,
+    supportedActions: a.supportedActions,
+    pricing: a.pricing,
+    description: a.description,
+    mode: a.mode,
+    active: a.active,
+    source: a.source,
+    capabilities: a.capabilities,
+    registeredAt: a.registeredAt,
+  }));
+
+  const agentSessions = getAllSessions()
+    .filter((s) => s.mode === "agent")
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  res.json({
+    mode: getMode(),
+    rpcConnected: isRpcConnected(),
+    agents,
+    sessions: agentSessions,
+    txFeed: getTxFeed(100),
+    timestamp: Date.now(),
+  });
 });
 
 // ── Export for Vercel serverless ──────────────────────────────────────

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { injected } from "wagmi/connectors";
-import { Activity, Wallet, Zap } from "lucide-react";
+import { Activity, Wallet, Zap, Eye } from "lucide-react";
 
 export function Navbar() {
   const { address, isConnected } = useAccount();
@@ -26,6 +26,13 @@ export function Navbar() {
             </Link>
 
             <div className="hidden md:flex items-center gap-6">
+              <Link
+                href="/observer"
+                className="text-arc-400 hover:text-arc-300 transition-colors text-sm font-medium flex items-center gap-1.5"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Live Demo
+              </Link>
               <Link
                 href="/loop"
                 className="text-gray-400 hover:text-white transition-colors text-sm font-medium"

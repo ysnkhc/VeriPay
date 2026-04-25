@@ -7,6 +7,8 @@
     "backend": "cd backend && npm run dev",
     "agent:provider": "cd agents/provider-agent && npm start",
     "agent:customer:test": "cd agents/customer-agent && node runner.js --test",
-    "agent:customer:demo": "cd agents/customer-agent && node runner.js --demo"
+    "agent:customer:demo": "cd agents/customer-agent && node runner.js --demo",
+    "demo:live": "cd agents/customer-agent && node runner.js --live",
+    "demo:dry": "cd agents/customer-agent && node runner.js --dry"
   }
 }
