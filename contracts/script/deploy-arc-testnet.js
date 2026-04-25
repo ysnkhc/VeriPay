@@ -125,15 +125,17 @@ async function deploy() {
     process.exit(1);
   }
 
-  // Deploy MockUSDC
-  const usdc = forgeCreate("src/mocks/MockUSDC.sol", "MockUSDC");
+  // Real Circle USDC on Arc Testnet
+  const CIRCLE_USDC_ADDRESS = "0x3600000000000000000000000000000000000000";
+  const usdc = { address: CIRCLE_USDC_ADDRESS, txHash: "(native)" };
+  console.log(`  Using real Circle USDC: ${CIRCLE_USDC_ADDRESS}`);
   console.log("");
 
   // Deploy UsageMeter
   const meter = forgeCreate("src/JobRegistry.sol", "UsageMeter");
   console.log("");
 
-  // Deploy NanoSettlement (constructor args: usdc address, meter address)
+  // Deploy NanoSettlement (constructor args: real Circle USDC address, meter address)
   const settlement = forgeCreate("src/EscrowVault.sol", "NanoSettlement", [usdc.address, meter.address]);
   console.log("");
 
@@ -149,12 +151,8 @@ async function deploy() {
   }
   console.log("");
 
-  // Mint test USDC to deployer
-  console.log("  Minting 10,000 USDC to deployer...");
-  const minted = forgeSend(usdc.address, "mint(address,uint256)", [DEPLOYER, "10000000000"]);
-  if (minted) {
-    console.log("    ✓ 10,000 USDC minted");
-  }
+  // No minting needed — real Circle USDC comes from Circle Faucet
+  console.log("  Skipping USDC mint (using real Circle USDC — fund wallets via https://faucet.circle.com/)");
   console.log("");
 
   // ── 3. Write .env files ───────────────────────────────────────────────
@@ -193,13 +191,13 @@ async function deploy() {
   console.log("  ✓ All contracts deployed to Arc Testnet!");
   console.log("");
   console.log("  Addresses:");
-  console.log(`    MockUSDC:         ${usdc.address}`);
+  console.log(`    USDC (Circle):    ${usdc.address}`);
   console.log(`    UsageMeter:       ${meter.address}`);
   console.log(`    NanoSettlement:   ${settlement.address}`);
   console.log(`    AgentRegistry:    ${registry.address}`);
   console.log("");
   console.log("  Explorer:");
-  console.log(`    MockUSDC:         https://testnet.arcscan.app/address/${usdc.address}`);
+  console.log(`    USDC (Circle):    https://testnet.arcscan.app/address/${usdc.address}`);
   console.log(`    UsageMeter:       https://testnet.arcscan.app/address/${meter.address}`);
   console.log(`    NanoSettlement:   https://testnet.arcscan.app/address/${settlement.address}`);
   console.log(`    AgentRegistry:    https://testnet.arcscan.app/address/${registry.address}`);

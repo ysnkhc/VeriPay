@@ -33,7 +33,7 @@ const ACTION_COUNT = MODE === "demo100" ? 100 : MODE === "demo" ? 50 : 5;
 const BACKEND_URL  = process.env.VERIPAY_BACKEND_URL || "http://localhost:3001";
 const CUSTOMER_ID  = process.env.CUSTOMER_AGENT_ID || "customer-payment-agent";
 const PRICE_PER_ACTION = 0.001; // USDC
-const MIN_BUDGET = (ACTION_COUNT * PRICE_PER_ACTION * 1.6).toFixed(2); // 60% margin
+const MIN_BUDGET = (ACTION_COUNT * PRICE_PER_ACTION).toFixed(2);
 const envBudget = process.env.CUSTOMER_AGENT_BUDGET_USDC;
 const BUDGET_USDC = (envBudget && parseFloat(envBudget) >= parseFloat(MIN_BUDGET))
   ? envBudget : MIN_BUDGET;
@@ -352,7 +352,7 @@ async function main() {
     {
       providerAgentId: providerId,
       budget:          BUDGET_MICRO,
-      maxActions:      ACTION_COUNT + 10,
+      maxActions:      ACTION_COUNT,
       metadata:        `agent-loop://${CUSTOMER_ID}/${MODE}`,
     },
     authH
@@ -708,6 +708,27 @@ async function main() {
   ${G}${B}Savings: ${oldModelTxs} txs → ${newModelTxs} txs (${Math.round(oldModelTxs / Math.max(newModelTxs, 1))}× reduction)${R}
   ${G}${B}Cost:   $${ethOldCost} → $${arcNewCost} (${Math.round(parseFloat(ethOldCost) / Math.max(parseFloat(arcNewCost), 0.0001))}× cheaper)${R}
   `);
+  }
+
+  // Strict exit: fail if any settlement was fallback (no real onchain tx)
+  const hasFallback = batches.some(b => !b.settleTxHash || b.settleTxHash.startsWith("0x000000"));
+  if (hasFallback && !DRY_RUN) {
+    if (DEMO_MODE) {
+      console.log(`  ❌ Settlement used fallback mode — no real onchain tx.`);
+      console.log(`     Fix contract USDC address alignment and redeploy.`);
+    } else {
+      fail("Settlement used fallback — no real onchain settlement tx.");
+    }
+    process.exit(1);
+  }
+
+  if (realBatches.length === 0 && !DRY_RUN && successCount > 0) {
+    if (DEMO_MODE) {
+      console.log(`  ❌ No real settlement transactions found.`);
+    } else {
+      fail("No real settlement transactions.");
+    }
+    process.exit(1);
   }
 
   process.exit(failedCount > 0 ? 1 : 0);

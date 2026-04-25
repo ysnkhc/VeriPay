@@ -519,27 +519,12 @@ export function getCustomerWallet(privateKey: string): ethers.Signer {
 }
 
 /**
- * Mint test USDC to an address (Anvil only — mock USDC has a mint function).
+ * Mint test USDC — NOT available with real Circle USDC.
+ * Fund wallets via https://faucet.circle.com/ instead.
  */
 export async function mintTestUSDC(toAddress: string, amount: number): Promise<string> {
-  if (getMode() === "fallback") {
-    console.log(`[settlement][FALLBACK] Mock-minted ${amount} USDC to ${toAddress}`);
-    return mockTxHash();
-  }
-
-  return queueOperatorTx(async () => {
-    try {
-      const wallet = getOperatorWallet();
-      const usdc = getUsdcContract(wallet);
-      const tx = await usdc.mint(toAddress, amount);
-      const receipt = await tx.wait();
-      console.log(`[settlement] Minted ${amount} USDC to ${toAddress} | tx: ${receipt.hash}`);
-      return receipt.hash;
-    } catch (err: any) {
-      console.warn(`[settlement] Mint failed: ${err.message}`);
-      return mockTxHash();
-    }
-  });
+  console.warn(`[settlement] mintTestUSDC not available — using real Circle USDC. Fund ${toAddress} via https://faucet.circle.com/`);
+  return mockTxHash();
 }
 
 /**

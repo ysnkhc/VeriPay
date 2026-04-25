@@ -293,7 +293,7 @@ export async function initAgentSession(
   updateSession(sessionId, { onchainId, status: "active" });
   session.onchainId = onchainId;
 
-  // Deposit budget into session (operator has MockUSDC from deploy)
+  // Deposit budget into session (operator must have real Circle USDC)
   await depositSessionOnchain(onchainId, session.budget);
   updateSession(sessionId, { status: "running" });
 
