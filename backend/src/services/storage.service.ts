@@ -3,11 +3,18 @@ import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { v4 as uuidv4 } from "uuid";
 
-const STORAGE_DIR = join(process.cwd(), "data", "storage");
+// On Vercel, use /tmp (writable). Locally, use data/storage.
+const STORAGE_DIR = process.env.VERCEL === "1"
+  ? join("/tmp", "veripay-storage")
+  : join(process.cwd(), "data", "storage");
 
 // Ensure storage dir exists
-if (!existsSync(STORAGE_DIR)) {
-  mkdirSync(STORAGE_DIR, { recursive: true });
+try {
+  if (!existsSync(STORAGE_DIR)) {
+    mkdirSync(STORAGE_DIR, { recursive: true });
+  }
+} catch {
+  // Read-only filesystem — storage will be in-memory only
 }
 
 // In-memory index for quick lookup

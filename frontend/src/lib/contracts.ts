@@ -6,7 +6,9 @@ export const CONTRACTS = {
   usdc: (process.env.NEXT_PUBLIC_USDC_ADDRESS || "0x") as `0x${string}`,
 };
 
-export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
+// In production on Vercel, API calls are proxied via rewrites (same origin → /api/*)
+// so BACKEND_URL should be empty string. Locally, it points to the dev backend.
+export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 // Session status labels
 export const SESSION_STATUS = [

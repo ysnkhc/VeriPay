@@ -64,40 +64,44 @@ app.get("/api/tx-feed", (req, res) => {
   res.json(getTxFeed(limit));
 });
 
-// ── Start ─────────────────────────────────────────────────────────────
-app.listen(config.port, async () => {
-  console.log("");
-  console.log("═══════════════════════════════════════════════════════");
-  console.log("  VeriPay Loop — Backend");
-  console.log("═══════════════════════════════════════════════════════");
-  console.log(`  Port:     ${config.port}`);
-  console.log(`  RPC:      ${config.arcRpcUrl}`);
-  console.log(`  Operator: ${config.operatorAddress || "(not set)"}`);
-  console.log(`  Agents:   ${getAllAgents().length} loaded`);
-  console.log("");
+// ── Export for Vercel serverless ──────────────────────────────────────
+export default app;
 
-  if (config.onchainMode) {
-    console.log("  Contracts:");
-    console.log(`    UsageMeter:       ${config.contracts.usageMeter}`);
-    console.log(`    NanoSettlement:   ${config.contracts.nanoSettlement}`);
-    console.log(`    AgentRegistry:    ${config.contracts.agentRegistry || "(none)"}`);
-    console.log(`    USDC:             ${config.contracts.usdc}`);
+// ── Start (local dev / standalone) ───────────────────────────────────
+if (process.env.VERCEL !== "1") {
+  app.listen(config.port, async () => {
+    console.log("");
+    console.log("═══════════════════════════════════════════════════════");
+    console.log("  VeriPay Loop — Backend");
+    console.log("═══════════════════════════════════════════════════════");
+    console.log(`  Port:     ${config.port}`);
+    console.log(`  RPC:      ${config.arcRpcUrl}`);
+    console.log(`  Operator: ${config.operatorAddress || "(not set)"}`);
+    console.log(`  Agents:   ${getAllAgents().length} loaded`);
     console.log("");
 
-    const rpcOk = await checkRpcConnection();
-    if (rpcOk) {
-      console.log("  ✅ ONCHAIN MODE — real settlements via Anvil");
-      // Start onchain registry sync
-      startRegistrySync();
-    } else {
-      console.log("  ⚠️  FALLBACK MODE — RPC unreachable, using offchain mock");
-      console.log("     Start Anvil and restart to enable onchain mode.");
-    }
-  } else {
-    console.log("  ⚠️  FALLBACK MODE — contract addresses not configured");
-    console.log("     Run: cd contracts && bash script/demo-deploy.sh");
-  }
+    if (config.onchainMode) {
+      console.log("  Contracts:");
+      console.log(`    UsageMeter:       ${config.contracts.usageMeter}`);
+      console.log(`    NanoSettlement:   ${config.contracts.nanoSettlement}`);
+      console.log(`    AgentRegistry:    ${config.contracts.agentRegistry || "(none)"}`);
+      console.log(`    USDC:             ${config.contracts.usdc}`);
+      console.log("");
 
-  console.log("═══════════════════════════════════════════════════════");
-  console.log("");
-});
+      const rpcOk = await checkRpcConnection();
+      if (rpcOk) {
+        console.log("  ✅ ONCHAIN MODE — real settlements via Anvil");
+        startRegistrySync();
+      } else {
+        console.log("  ⚠️  FALLBACK MODE — RPC unreachable, using offchain mock");
+        console.log("     Start Anvil and restart to enable onchain mode.");
+      }
+    } else {
+      console.log("  ⚠️  FALLBACK MODE — contract addresses not configured");
+      console.log("     Run: cd contracts && bash script/demo-deploy.sh");
+    }
+
+    console.log("═══════════════════════════════════════════════════════");
+    console.log("");
+  });
+}
