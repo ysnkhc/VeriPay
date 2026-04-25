@@ -3,6 +3,7 @@
 
 require("dotenv").config();
 const express = require("express");
+const cors = require("cors");
 const { ethers } = require("ethers");
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -78,6 +79,7 @@ function analyzeRisk(input, actionIndex) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 // ── GET /health ──────────────────────────────────────────────────────────
