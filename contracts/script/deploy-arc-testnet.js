@@ -56,18 +56,28 @@ function forgeCreate(contractPath, contractName, constructorArgs = []) {
   console.log(`  Deploying ${contractName}...`);
   try {
     const output = execSync(cmd, { cwd: CONTRACTS_DIR, encoding: "utf-8", timeout: 120000 });
-    // Parse JSON output — forge create --json returns JSON with deployedTo
-    const lines = output.trim().split("\n");
-    for (const line of lines) {
+    // Parse JSON output — forge create --json may return pretty-printed multi-line JSON
+    // Try full output first, then line-by-line, then regex fallback
+    try {
+      const parsed = JSON.parse(output.trim());
+      if (parsed.deployedTo) {
+        console.log(`    ✓ ${contractName}: ${parsed.deployedTo} (tx: ${parsed.transactionHash})`);
+        return { address: parsed.deployedTo, txHash: parsed.transactionHash };
+      }
+    } catch {}
+    // Try extracting JSON object from output (may have non-JSON prefix/suffix)
+    const jsonMatch = output.match(/\{[\s\S]*"deployedTo"\s*:\s*"(0x[a-fA-F0-9]{40})"[\s\S]*\}/);
+    if (jsonMatch) {
       try {
-        const parsed = JSON.parse(line);
-        if (parsed.deployedTo) {
-          console.log(`    ✓ ${contractName}: ${parsed.deployedTo} (tx: ${parsed.transactionHash})`);
-          return { address: parsed.deployedTo, txHash: parsed.transactionHash };
-        }
+        const parsed = JSON.parse(jsonMatch[0]);
+        console.log(`    ✓ ${contractName}: ${parsed.deployedTo} (tx: ${parsed.transactionHash})`);
+        return { address: parsed.deployedTo, txHash: parsed.transactionHash };
       } catch {}
+      // Regex matched but JSON parse failed — extract address directly
+      console.log(`    ✓ ${contractName}: ${jsonMatch[1]}`);
+      return { address: jsonMatch[1], txHash: "" };
     }
-    // Fallback: try to find address in non-JSON output
+    // Final fallback: Deployed to: pattern
     const addrMatch = output.match(/Deployed to:\s*(0x[a-fA-F0-9]{40})/);
     if (addrMatch) {
       console.log(`    ✓ ${contractName}: ${addrMatch[1]}`);
@@ -85,7 +95,8 @@ function forgeCreate(contractPath, contractName, constructorArgs = []) {
 
 // ── Helper: run forge send (call contract function) ─────────────────────
 function forgeSend(contractAddress, signature, args = []) {
-  let cmd = `"${FORGE}" send "${contractAddress}" "${signature}" ${args.join(" ")} --rpc-url "${RPC_URL}" --private-key "${PRIVATE_KEY}"`;
+  const CAST = process.env.CAST_PATH || path.join(process.env.USERPROFILE, ".foundry", "bin", "cast.exe");
+  let cmd = `"${CAST}" send "${contractAddress}" "${signature}" ${args.join(" ")} --rpc-url "${RPC_URL}" --private-key "${PRIVATE_KEY}"`;
   try {
     execSync(cmd, { cwd: CONTRACTS_DIR, encoding: "utf-8", timeout: 60000 });
     return true;
