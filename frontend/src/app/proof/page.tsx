@@ -163,7 +163,7 @@ export default function ProofPage() {
               <div className="flex justify-between">
                 <span className="text-xs text-gray-500">Actions covered</span>
                 <span className="text-sm text-white font-mono">
-                  {totalActions > 0 ? `${rootMeta.firstActionIndex}\u2013${rootMeta.lastActionIndex}` : "\u2014"}
+                  {totalActions > 0 ? `${rootMeta.firstActionIndex}\u2013${rootMeta.firstActionIndex + totalActions - 1}` : "\u2014"}
                 </span>
               </div>
               <div className="flex justify-between">
