@@ -1,14 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useAccount, useConnect, useDisconnect } from "wagmi";
-import { injected } from "wagmi/connectors";
-import { Activity, Wallet, Zap, Eye } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { Activity, Zap, Eye, Bot, GitBranch, Shield } from "lucide-react";
 
 export function Navbar() {
-  const { address, isConnected } = useAccount();
-  const { connect } = useConnect();
-  const { disconnect } = useDisconnect();
+  const pathname = usePathname();
+
+  const links = [
+    { href: "/observer", label: "Live Demo", icon: Eye },
+    { href: "/agents", label: "Agents", icon: Bot },
+    { href: "/protocol", label: "Protocol", icon: GitBranch },
+    { href: "/proof", label: "Proof", icon: Shield },
+  ];
 
   return (
     <nav className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-0 z-50">
@@ -21,72 +25,33 @@ export function Navbar() {
               </div>
               <span className="text-lg font-bold text-white">
                 Veri<span className="text-arc-400">Pay</span>
-                <span className="text-gray-500 text-sm ml-1">Loop</span>
               </span>
             </Link>
 
-            <div className="hidden md:flex items-center gap-6">
-              <Link
-                href="/observer"
-                className="text-arc-400 hover:text-arc-300 transition-colors text-sm font-medium flex items-center gap-1.5"
-              >
-                <Eye className="w-3.5 h-3.5" />
-                Live Demo
-              </Link>
-              <Link
-                href="/loop"
-                className="text-gray-400 hover:text-white transition-colors text-sm font-medium"
-              >
-                Demo
-              </Link>
-              <Link
-                href="/agents"
-                className="text-gray-400 hover:text-white transition-colors text-sm font-medium"
-              >
-                Agents
-              </Link>
-              <Link
-                href="/protocol"
-                className="text-gray-400 hover:text-white transition-colors text-sm font-medium"
-              >
-                Agent Network
-              </Link>
-              <Link
-                href="/metrics"
-                className="text-gray-400 hover:text-white transition-colors text-sm font-medium"
-              >
-                Metrics
-              </Link>
+            <div className="hidden md:flex items-center gap-1">
+              {links.map((link) => {
+                const isActive = pathname === link.href;
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                      isActive
+                        ? "text-arc-300 bg-arc-500/10"
+                        : "text-gray-400 hover:text-white hover:bg-gray-800/50"
+                    }`}
+                  >
+                    <link.icon className="w-3.5 h-3.5" />
+                    {link.label}
+                  </Link>
+                );
+              })}
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-              <Zap className="w-3 h-3" />
-              <span>Arc Testnet</span>
-            </div>
-
-            {isConnected ? (
-              <div className="flex items-center gap-3">
-                <div className="text-sm text-gray-400 font-mono bg-gray-800 px-3 py-1.5 rounded-lg">
-                  {address?.slice(0, 6)}...{address?.slice(-4)}
-                </div>
-                <button
-                  onClick={() => disconnect()}
-                  className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
-                >
-                  Disconnect
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => connect({ connector: injected() })}
-                className="btn-primary flex items-center gap-2 text-sm"
-              >
-                <Wallet className="w-4 h-4" />
-                Connect Wallet
-              </button>
-            )}
+          <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
+            <Zap className="w-3 h-3" />
+            <span>Arc Testnet</span>
           </div>
         </div>
       </div>
