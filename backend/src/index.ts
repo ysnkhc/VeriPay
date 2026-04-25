@@ -9,7 +9,7 @@ import protocolRouter from "./routes/protocol.routes";
 import operatorRouter from "./routes/operator.routes";
 import { getAllAgents } from "./services/agent.service";
 import { getTxFeed, getAllSessions } from "./services/session.service";
-import { checkRpcConnection, isRpcConnected, getMode, startBackgroundFlush } from "./services/settlement.service";
+import { checkRpcConnection, isRpcConnected, getMode, startBackgroundFlush, getActionRoot, getActionRootMeta, getBatchResults } from "./services/settlement.service";
 import { startRegistrySync } from "./services/registry.service";
 
 const app = express();
@@ -84,7 +84,19 @@ app.get("/api/observer/state", async (_req, res) => {
 
   const agentSessions = getAllSessions()
     .filter((s) => s.mode === "agent")
-    .sort((a, b) => b.createdAt - a.createdAt);
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((s) => {
+      const onchainId = s.onchainId;
+      if (onchainId != null) {
+        return {
+          ...s,
+          actionRoot: getActionRoot(onchainId),
+          rootMeta: getActionRootMeta(onchainId),
+          batches: getBatchResults(onchainId),
+        };
+      }
+      return s;
+    });
 
   res.json({
     mode: getMode(),
